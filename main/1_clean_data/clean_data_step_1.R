@@ -49,6 +49,9 @@ cat(paste0(format(Sys.time(), format="%H:%M:%S"), "    Identifying cohabitators.
 # erence person lives with a cohabiting partner and that
 # partner's nonchild relatives.
 
+# Remove pointer variables so we don't accidentally use them:
+d[ , c("momloc", "poploc", "sploc", "famunit") := NULL]
+
 d[ , cohabp1 := age > 14 & relate == "Head/householder" & marst != "Married, spouse present"]
 d[ , cohabp2 := age > 14 & relate %in% c("Partner/roommate", "Unmarried partner", "Housemate/roomate",
                                          "Roomer/boarder/lodger", "Other nonrelatives") & marst != "Married, spouse present"]
@@ -103,80 +106,69 @@ setkey(d, year, serial)
 # to the householder. If not, then these cohabp2's are children of unrelated
 # families and thus cannot be a cohabp2, but they also can't disqualify the 
 # household from being classified as cohabiting.
-d[ , cohabp2_mom_pernum := paste0(momloc[which(momloc > 0 & cohabp2==TRUE)], collapse="&"), by=key(d)]
-d[ , cohabp2_pop_pernum := paste0(poploc[which(poploc > 0 & cohabp2==TRUE)], collapse="&"), by=key(d)]
 
-# table(d$cohabp2_mom_pernum)
-
-#                  10       2     2&2   2&2&2       3     3&3       4     4&4       5     5&5       6 
-#     2527424      12    1043     142      15     387      26     184      13     109       7      22 
-
-# table(d$cohabp2_pop_pernum)
-
-#                  11       2     2&2       3     3&3       4       5     5&5       6       7 
-#     2528907      13     139       4     103       6     139      44       7      14       8 
-
-# In each case of multiple cohabp2's with a parent in the household, the parent is shared
-# (as evidenced by the repeated pernum). So I can change the mom and pop pernum vars:
-d[ , cohabp2_mom_pernum := NULL]
-d[ , cohabp2_pop_pernum := NULL]
-d[ , cohabp2_mom_pernum := momloc[which(momloc > 0 & cohabp2==TRUE)][1], by=key(d)]
-d[ , cohabp2_pop_pernum := poploc[which(poploc > 0 & cohabp2==TRUE)][1], by=key(d)]
-
-d[ , cohabp2_mom_relate := relate[which(pernum==cohabp2_mom_pernum)], by=key(d)]
-# table(as.character(d$cohabp2_mom_relate))
-
-#     Housemate/roomate    Other nonrelatives      Partner/roommate Roomer/boarder/lodger     Unmarried partner 
-#                   139                   625                    17                    20                  1159 
-
-d[ , cohabp2_pop_relate := relate[which(pernum==cohabp2_pop_pernum)], by=key(d)]
-# table(as.character(d$cohabp2_pop_relate))
-
-#     Housemate/roomate    Other nonrelatives      Partner/roommate Roomer/boarder/lodger     Unmarried partner 
-#                    34                   192                     6                    14                   231
-
-# All of the parents of cohabp2's are non-relatives of the head/householder. That means
-# all cohabp2's with momloc > 0 or poploc > 0 are disqualified from being a cohabp2.
-
-d[ , cohabp2 := cohabp2 & momloc==0 & poploc==0]
-# table(d$cohabp2)
-# That reduces cohabp2's to 39,867
-
-# recalculate hhcohabp2
-d[ , hhcohabp2 := NULL]
-d[ , hhcohabp2 := sum(cohabp2), by=key(d)]
-
-d[, hhcohabstep1 := hhcohabp1==1 & hhcohabp2 > 0]
-# a = d[ , list(step1=hhcohabstep1[1], n_cohab2=hhcohabp2[1]), by = key(d)]
-# table(a[ , list(step1, n_cohab2)])
-# rm(a)
-
-#            n_cohab2
-#     step1        0      1      2      3      4      5      6      7
-#       FALSE 864208      0      0      0      0      0      0      0
-#       TRUE       0  36511   1359    158     26      7      3      1
-
-# Although the number of cohabp2's went down, the number of households
-# with just one cohabp1 and one cohabp2 went up.
+# DB 1/22/2022, updating code to not use pointers:
+##################################################
+# We can no longer distinguish whether potential cohabitors have a parent in the 
+# household, so we can't disqualify potential cohabitors who are children in 
+# unrelated subfamilies
 
 # Are there any other adults (age > 14) who are themselves unrelated to the householder
 # but aren't foster children or children of unrelated subfamilies?
 
+# DB 1/22/2022, updating code to not use pointers: 
+##################################################
+# In effect, this is now just excluding households where there is another person 
+# age 15+ in one of these relate categories, but who is the same sex as the head.
+
 d[ , cohaboth := age > 14 & relate %in% c("Partner/roommate", "Unmarried partner", "Housemate/roomate",
-                                          "Roomer/boarder/lodger", "Other nonrelatives") & momloc==0 &
-       poploc==0 & cohabp2==0]
+                                          "Roomer/boarder/lodger", "Other nonrelatives") & cohabp2==0]
 
 d[ , hhcohaboth := sum(cohaboth), by=key(d)]
 
 # table(d[ , list(step1=hhcohabp1[1]==1 & hhcohabp2[1]==1, any_cohaboth=hhcohaboth[1] > 0), by=key(d)][ , list(step1, any_cohaboth)])
 
-# 1,844 households have just one cohabp1 and cohabp2, but also have another unrelated adult
+# 2,134 households have just one cohabp1 and cohabp2, but also have another unrelated adult
 # that is not a foster child or child of an unrelated subfamily.
 
-d[ , hhcohb := hhcohabp1==1 & hhcohabp2==1 & hhcohaboth==0 & gq != "Group Quarters"]
+# DB 1/22/2022, updating code to not use pointers: 
+##################################################
+# Not sure if we have an equivalent to GQ in LIS -- maybe hhtype == 800?
+# There isn't an exact equivalent, but hhtype == 800, "nonrelatives living 
+# together", seems pretty close
+
+nonrelatives <- c("Partner/roommate", "Unmarried partner", "Housemate/roomate",
+                  "Roomer/boarder/lodger", "Other nonrelatives")
+
+d[ 
+    , 
+    all_nonrelatives := .N > 1 & all(relate %in% c("Head/householder", nonrelatives)),
+    by = .(serial, year)
+]
+
+
+d[
+    pernum == 1, 
+    
+][
+    , 
+    .N, 
+    by = .(all_nonrelatives, gq)
+][ 
+    , 
+    total := sum(N), by = .(gq)
+][
+    ,
+    pct := round(100 * N / total, 1)
+][]
+# Only 16% of group quarters households consist of nonrelatives only, thus, this 
+# is not a good proxy for group quarters. We should just allow for cohabitors in 
+# group quarters households
+
+d[ , hhcohb := hhcohabp1==1 & hhcohabp2==1 & hhcohaboth==0]
 # table(d[ , hhcohb[1], by=key(d)][ , V1])
 
-# Thus, out of 908,849 households, adjusted POSSLQ identifies 34,659 (3.81%) as cohabitating households
+# Thus, out of 908,849 households, adjusted POSSLQ identifies 33,978 (3.74%) as cohabitating households
 
 d[ , cohabp1 := cohabp1 & hhcohb]
 d[ , cohabp2 := cohabp2 & hhcohb]
@@ -190,17 +182,21 @@ d[ , hhcohabp2 := NULL]
 d[ , hhcohabstep1 := NULL]
 d[ , cohaboth := NULL]
 d[ , hhcohaboth := NULL]
-d[ , cohabp2_mom_relate := NULL]
-d[ , cohabp2_pop_relate := NULL]
-d[ , cohabp2_mom_pernum := NULL]
-d[ , cohabp2_pop_pernum := NULL]
+# d[ , cohabp2_mom_relate := NULL]
+# d[ , cohabp2_pop_relate := NULL]
+# d[ , cohabp2_mom_pernum := NULL]
+# d[ , cohabp2_pop_pernum := NULL]
 d[ , hhcohb := NULL]
 
 
+# DB, 5/5/2022, updating code to not use pointers:
+##################################################
+# Can't use famunit, so I've commented out the code below
+
 # Now that we've identified cohabitors, we need to add the cohabp2's 
 # and their family members to the primary family
-d[ , cohabp2_famunit := famunit[cohabp2], by=key(d)]
-d[famunit==cohabp2_famunit, famunit := "1st family in household or group quarters"]
-d[ , cohabp2_famunit := NULL]
+# d[ , cohabp2_famunit := famunit[cohabp2], by=key(d)]
+# d[famunit==cohabp2_famunit, famunit := "1st family in household or group quarters"]
+# d[ , cohabp2_famunit := NULL]
 
 save(d, file="main/1_clean_data/cleaned_data_step_1.Rdata")

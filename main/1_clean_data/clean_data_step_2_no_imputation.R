@@ -36,31 +36,11 @@ d[incretir > 0 & year >= 1989 & is.na(increti1), increti1 := incretir] # Fix two
 d[ , incdisab := NULL]
 d[ , incsurv := NULL]
 
-# Make data quality variable key
-q_flags <- names(d)[grep("^q", names(d))]
-get_var_name_from_flag_name <- function(x) {
-    pattern <- paste0("^", ifelse(grepl("\\d$", x), substr(x, 2, 7), substr(x, 2, nchar(x))))
-    names(d)[grep(pattern, names(d))]
-}
-names(q_flags) <- sapply(q_flags, get_var_name_from_flag_name)
 
-rm(get_var_name_from_flag_name)
-
-# Fix data quality flag names that don't match the pattern
-change_name <- function(flag, new_name) names(q_flags)[which(q_flags==flag)] <<- new_name
-change_name("qwkswork", "wkswork1")
-q_flags["wkswork2"] <- "qwkswork"
-change_name("qincassi", "incasist")
-change_name("qincdis1", "incdisa1")
-change_name("qincdis2", "incdisa2")
-change_name("qincret1", "increti1")
-change_name("qincret2", "increti2")
-change_name("qincreti", "incretir")
-change_name("qincss", "incss")
-change_name("qincsur1", "incsurv1")
-change_name("qincsur2", "incsurv2")
-
-rm(change_name)
+# DB, 5/5/2022, updating code to not use pointers:
+##################################################
+# I don't think we need to do anything with the quality flags for the 
+# no-imputation track, so I removed that stuff from this script
 
 # Load topcodes and transform into matrix with rownames as varnames and colnames as years
 topcodes <- data.table(read.csv("original_data/topcode_values.csv", stringsAsFactors=FALSE))

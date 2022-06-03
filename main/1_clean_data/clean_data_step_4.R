@@ -3,8 +3,8 @@ library(stringr)
 
 # CLEANING TO PREPARE FOR MULTIPLE IMPUTATION OR NOT?
 
-# imputation <- FALSE
-imputation <- TRUE
+imputation <- FALSE
+# imputation <- TRUE
 
 cargs <- commandArgs(trailingOnly = TRUE)
 cargs <- str_subset(cargs, "imputation")
@@ -42,7 +42,8 @@ d[ , posern := factor(ifelse(labern > 0, "Has positive earnings", "Has zero or n
 
 
 # Create hd_or_pn
-d[ , hd_or_pn := marr_cohab=="Married or cohabiting" | fam_head]
+# DB May 2022 update: we only want this to flag heads and their partners
+d[ , hd_or_pn := fam_head | relate == "Spouse" | cohabp2]
 
 # Create non_earnings_income
 nei_69_71 <- c("incss", "incwelfr", "incgov", "incidr", "incaloth")
@@ -64,13 +65,40 @@ rm(nei_69_71, nei_79_81, nei_89_11)
 # Create inc_sum
 d[ , inc_sum := apply(d[ , list(labern, non_earnings_income)], 1, sum, na.rm=TRUE)]
 
-# Create subfaminc: the sum of income of all family members
-setkey(d, year, serial, subfamid)
-d <- d[ , list(subfaminc=sum(inc_sum, na.rm=TRUE)), by=key(d)][d]
+# Create hhinc: the sum of income of all household members
+setkey(d, year, serial)
+d <- d[ , list(hhinc=sum(inc_sum, na.rm=TRUE)), by=key(d)][d]
 
 
 # To create partner vars: Extract pnloc, posern, and labern, and rename 
 # them to prepare for reintegration as partner variables.
+
+
+# DB 5/9/2022, updating to not use pointer variables:
+#####################################################
+# Let's create a crude version of pnloc for heads <-> spouses and 
+# cohabp1 <-> cohabp2
+setkey(d, year, serial)
+d[ , pernum_of_head := pernum[relate == "Head/householder"], by = key(d)]
+d[ , pernum_of_spouse := pernum[relate == "Spouse"], by = key(d)]
+d[ , pernum_of_cohabp1 := pernum[cohabp1], by = key(d)]
+d[ , pernum_of_cohabp2 := pernum[cohabp2], by = key(d)]
+d[ , pnloc := 0L]
+d[relate == "Head/householder", pnloc := pernum_of_spouse]
+d[relate == "Spouse", pnloc := pernum_of_head]
+d[cohabp1 == TRUE, pnloc := pernum_of_cohabp2]
+d[cohabp2 == TRUE, pnloc := pernum_of_cohabp1]
+d[is.na(pnloc), pnloc := 0L]
+
+d[ 
+    , 
+    c(
+        "pernum_of_head", "pernum_of_spouse", "pernum_of_cohabp1", 
+        "pernum_of_cohabp2"
+    ) := NULL
+]
+
+
 pn_vars <- d[pnloc > 0, list(year=year, serial=serial, pernum=pnloc, pn_posern=posern, pn_labern=labern, pn_sex=sex)]
 setkey(d, year, serial, pernum)
 setkey(pn_vars, year, serial, pernum)
@@ -79,10 +107,22 @@ rm(pn_vars)
 
 
 # Create num_earners
-setkey(d, year, serial, subfamid)
-d <- d[ , list(num_earners=sapply(length(which((marr_cohab=="Married or cohabiting" | fam_head) & posern=="Has positive earnings")), 
-                                  function(x) if(x==0) "Zero earners" else if(x==1) "One earner" else if(x==2) "Two earners")), by=key(d)][d]
+setkey(d, year, serial)
+d[
+    ,
+    is_an_earner := (fam_head & posern == "Has positive earnings") |
+        (relate == "Spouse" & posern == "Has positive earnings") |
+        (cohabp2 & posern == "Has positive earnings")
+]
+
+d[ , num_earners := sum(is_an_earner), by = key(d)]
+
+d[ , num_earners := as.character(num_earners)]
+d[num_earners == "0", num_earners := "Zero earners"]
+d[num_earners == "1", num_earners := "One earner"]
+d[num_earners == "2", num_earners := "Two earners"]
 d[ , num_earners := as.factor(num_earners)]
+
 
 # Create group = sex:marr_cohab:num_earners
 d[ , sex := as.factor(sex)]
@@ -113,7 +153,7 @@ d[ , age_group_by_sex := sex:age_group]
 # Create sqrt_hh_size and sqrt_famsize
 setkey(d, year, serial)
 d[ , sqrt_hh_size := sqrt(.N), by=.(year, serial)]
-d[ , sqrt_famsize := sqrt(.N), by=.(year, serial, subfamid)]
+# d[ , sqrt_famsize := sqrt(.N), by=.(year, serial, subfamid)]
 
 # If sex is missing (because of qsex) and pnloc > 0, make sex equal the opposite of pn_sex
 d[is.na(sex) & pnloc > 0, sex := ifelse(pn_sex=="Male", "Female", "Male")]

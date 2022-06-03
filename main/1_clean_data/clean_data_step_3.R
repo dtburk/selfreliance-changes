@@ -4,8 +4,8 @@ library(foreign)
 
 # CLEANING TO PREPARE FOR MULTIPLE IMPUTATION OR NOT?
 
-# imputation <- FALSE
-imputation <- TRUE
+imputation <- FALSE
+# imputation <- TRUE
 
 cargs <- commandArgs(trailingOnly = TRUE)
 cargs <- str_subset(cargs, "imputation")
@@ -59,6 +59,39 @@ cat(paste0(format(Sys.time(), format="%H:%M:%S"), "    Identifying and labeling 
 # Unified approach to identifying related subfamilies and unrelated 
 # subfamily heads.
 
+# DB 5/9/2022 updating to not use pointers:
+###########################################
+# Just check for married heads of household without a spouse or cohabp2 in the 
+# household, and set them to married spouse absent before creating marr_cohab
+hhs_with_married_head <- d[
+    relate == "Head/householder" & marst=="Married, spouse present", 
+    .(year, serial)
+][ , has_married_head := TRUE]
+hhs_with_spouse <- d[relate == "Spouse", .(year, serial)][ , has_spouse := TRUE]
+hhs_with_cohabp2 <- d[cohabp2 == TRUE, .(year, serial)][ , has_cohabp2 := TRUE]
+d <- hhs_with_married_head[d, on = .(year, serial)]
+d <- hhs_with_spouse[d, on = .(year, serial)]
+d <- hhs_with_cohabp2[d, on = .(year, serial)]
+d[is.na(has_married_head), has_married_head := FALSE]
+d[is.na(has_spouse), has_spouse := FALSE]
+d[is.na(has_cohabp2), has_cohabp2 := FALSE]
+d[ 
+    , 
+    .SD[1], 
+    by = .(year, serial)
+][
+    has_married_head & !(has_spouse | has_cohabp2),
+    .(year, serial)
+]
+# There are two cases of a married head without a spouse or cohabitor present. 
+# We'll set these to "Married, spouse absent"
+d[
+    relate == "Head/householder" & marst == "Married, spouse present" &
+        !(has_spouse | has_cohabp2),
+    marst := "Married, spouse absent"
+]
+d[ , c("has_married_head", "has_spouse", "has_cohabp2") := NULL]
+
 # Flag married people with missing spouse (sploc==0)
 setkey(d, year, serial)
 # table(d[ , length(which(marst=="Married, spouse present" & sploc==0)), by=key(d)][ , V1])
@@ -66,102 +99,108 @@ setkey(d, year, serial)
 # and 79 people who are the only one in the hh with sploc==0.
 # I will just change marst to "Married, spouse absent" and marr_cohab to
 # "Not married or cohabiting" for these individuals
-d[marst=="Married, spouse present" & sploc==0, marst := "Married, spouse absent"]
-d[marst=="Married, spouse absent" & cohabp1==FALSE & cohabp2==FALSE, marr_cohab := "Not married or cohabiting"]
-
-# Load nchild
-nchild <- data.table(read.dta("original_data/cps_nchild.dta"))
-setkey(nchild, year, serial, pernum)
-setkey(d, year, serial, pernum)
-d <- nchild[d]
-rm(nchild)
+# d[marst=="Married, spouse present" & sploc==0, marst := "Married, spouse absent"]
+# d[marst=="Married, spouse absent" & cohabp1==FALSE & cohabp2==FALSE, marr_cohab := "Not married or cohabiting"]
+# 
+# # Load nchild
+# nchild <- data.table(read.dta("original_data/cps_nchild.dta"))
+# setkey(nchild, year, serial, pernum)
+# setkey(d, year, serial, pernum)
+# d <- nchild[d]
+# rm(nchild)
 
 # 1. First, flag anyone who is married/cohabiting (marr_cohab) and flag
 #    single parents (not married or cohabiting but nchild > 0).
 d[ , marr_cohab := factor(ifelse(marst=="Married, spouse present" | cohabp1 | cohabp2, 
                                  "Married or cohabiting", "Not married or cohabiting"))]
-d[ , single_parent := marr_cohab=="Not married or cohabiting" & nchild != "0 children present"]
+# d[ , single_parent := marr_cohab=="Not married or cohabiting" & nchild != "0 children present"]
 
 # 2. Create child flags for anyone with (momloc > 0 | poploc > 0) & 
 #    marr_cohab=="Not married or cohabiting" & nchild=="0 children present"
-d[ , child_w_mom := momloc > 0 & poploc==0 & marr_cohab=="Not married or cohabiting" & nchild=="0 children present"]
-d[ , child_w_pop := momloc==0 & poploc > 0 & marr_cohab=="Not married or cohabiting" & nchild=="0 children present"]
-d[ , child_w_both := momloc > 0 & poploc > 0 & marr_cohab=="Not married or cohabiting" & nchild=="0 children present"]
+# d[ , child_w_mom := momloc > 0 & poploc==0 & marr_cohab=="Not married or cohabiting" & nchild=="0 children present"]
+# d[ , child_w_pop := momloc==0 & poploc > 0 & marr_cohab=="Not married or cohabiting" & nchild=="0 children present"]
+# d[ , child_w_both := momloc > 0 & poploc > 0 & marr_cohab=="Not married or cohabiting" & nchild=="0 children present"]
 
 # 3. Create a pnloc variable that equals sploc for married people and 
 #    equals the pernum of cohabp2 for cohabp1 and vice versa.
-d[ , pnloc := ifelse(marst=="Married, spouse present", sploc, 0L)]
-setkey(d, year, serial)
-d[ , cohabp1_pernum := pernum[cohabp1], by=key(d)]
-d[ , cohabp2_pernum := pernum[cohabp2], by=key(d)]
-d[cohabp1==TRUE, pnloc := cohabp2_pernum]
-d[cohabp2==TRUE, pnloc := cohabp1_pernum]
-d[ , cohabp1_pernum := NULL]
-d[ , cohabp2_pernum := NULL]
+# d[ , pnloc := ifelse(marst=="Married, spouse present", sploc, 0L)]
+# setkey(d, year, serial)
+# d[ , cohabp1_pernum := pernum[cohabp1], by=key(d)]
+# d[ , cohabp2_pernum := pernum[cohabp2], by=key(d)]
+# d[cohabp1==TRUE, pnloc := cohabp2_pernum]
+# d[cohabp2==TRUE, pnloc := cohabp1_pernum]
+# d[ , cohabp1_pernum := NULL]
+# d[ , cohabp2_pernum := NULL]
 # table(d[marr_cohab=="Married or cohabiting", pnloc])
 
 # 4. Create a subfamid variable that is:
 #    - the smaller of pnloc and pernum for marr_cohab people;
-d[marr_cohab=="Married or cohabiting", subfamid := mapply(min, pnloc, pernum)]
+# d[marr_cohab=="Married or cohabiting", subfamid := mapply(min, pnloc, pernum)]
 
 #    - pernum for single parents;
-d[single_parent==TRUE, subfamid := pernum]
+# d[single_parent==TRUE, subfamid := pernum]
 
 #    - pernum for unmarried head/householders with no children present;
-d[relate=="Head/householder" & marr_cohab=="Not married or cohabiting" & nchild=="0 children present", subfamid := pernum]
+# d[relate=="Head/householder" & marr_cohab=="Not married or cohabiting" & nchild=="0 children present", subfamid := pernum]
 
 #    - subfamid of mom for children with only mom present, subfamid of pop for children with only pop present, and same subfamid of both parents if both are present;
-get_subfamid <- function(subset, pernums) {
-    do_string(dss("xx <- d[%s, list(year, serial, %s)]", c(subset, pernums)))
-    setnames(xx, pernums, "pernum")
-    setkey(xx, year, serial, pernum)
-    setkey(d, year, serial, pernum)
-    d[xx][ , subfamid]
-}
-
-d[child_w_mom==TRUE, subfamid := get_subfamid("child_w_mom==TRUE", "momloc")]
-d[child_w_pop==TRUE, subfamid := get_subfamid("child_w_pop==TRUE", "poploc")]
-
-d[child_w_both==TRUE, mom_subfamid := get_subfamid("child_w_both==TRUE", "momloc")]
-d[child_w_both==TRUE, pop_subfamid := get_subfamid("child_w_both==TRUE", "poploc")]
+# get_subfamid <- function(subset, pernums) {
+#     do_string(dss("xx <- d[%s, list(year, serial, %s)]", c(subset, pernums)))
+#     setnames(xx, pernums, "pernum")
+#     setkey(xx, year, serial, pernum)
+#     setkey(d, year, serial, pernum)
+#     d[xx][ , subfamid]
+# }
+# 
+# d[child_w_mom==TRUE, subfamid := get_subfamid("child_w_mom==TRUE", "momloc")]
+# d[child_w_pop==TRUE, subfamid := get_subfamid("child_w_pop==TRUE", "poploc")]
+# 
+# d[child_w_both==TRUE, mom_subfamid := get_subfamid("child_w_both==TRUE", "momloc")]
+# d[child_w_both==TRUE, pop_subfamid := get_subfamid("child_w_both==TRUE", "poploc")]
 # table(d[child_w_both==TRUE, mom_subfamid==pop_subfamid])
 # The preceding table shows that the mom and dad of all children with both present
 # have the same subfamid value; so we can just assign that of mom.
-d[child_w_both==TRUE, subfamid := mom_subfamid]
-d[ , mom_subfamid := NULL]
-d[ , pop_subfamid := NULL]
+# d[child_w_both==TRUE, subfamid := mom_subfamid]
+# d[ , mom_subfamid := NULL]
+# d[ , pop_subfamid := NULL]
 
-rm(get_subfamid)
+# rm(get_subfamid)
 
 #    - subfamid of the head for relatives of the head who aren't marr_cohab, single parents, or children;
-d[ , relative_or_foster_child_of_head := relate %in% c("Head/householder", "Spouse", "Child", 
-                                                       "Stepchild", "Parent", "Sibling", 
-                                                       "Grandchild", "Other relatives, n.s",
-                                                       "Foster children")]
-setkey(d, year, serial)
-d[ , subfamid_of_head := subfamid[which(relate=="Head/householder")], by=key(d)]
-d[relative_or_foster_child_of_head==TRUE & marr_cohab=="Not married or cohabiting" & 
-      single_parent==FALSE & momloc==0 & poploc==0, subfamid := subfamid_of_head]
+# d[ , relative_or_foster_child_of_head := relate %in% c("Head/householder", "Spouse", "Child", 
+#                                                        "Stepchild", "Parent", "Sibling", 
+#                                                        "Grandchild", "Other relatives, n.s",
+#                                                        "Foster children")]
+# setkey(d, year, serial)
+# d[ , subfamid_of_head := subfamid[which(relate=="Head/householder")], by=key(d)]
+# d[relative_or_foster_child_of_head==TRUE & marr_cohab=="Not married or cohabiting" & 
+#       single_parent==FALSE & momloc==0 & poploc==0, subfamid := subfamid_of_head]
 
 #    - and own pernum for those who aren't marr_cohab, single parents, children, or relatives of the head.
-d[relative_or_foster_child_of_head==FALSE & marr_cohab=="Not married or cohabiting" &
-      single_parent==FALSE & momloc==0 & poploc==0, subfamid := pernum]
+# d[relative_or_foster_child_of_head==FALSE & marr_cohab=="Not married or cohabiting" &
+#       single_parent==FALSE & momloc==0 & poploc==0, subfamid := pernum]
 
-d[ , n_subfam := length(unique(subfamid)), by=key(d)]
+# d[ , n_subfam := length(unique(subfamid)), by=key(d)]
 
 # Load ftype
-ftype <- data.table(read.dta("original_data/cps_ftype.dta"))
-setkey(ftype, year, serial, pernum)
-setkey(d, year, serial, pernum)
-d <- ftype[d]
-rm(ftype)
+# ftype <- data.table(read.dta("original_data/cps_ftype.dta"))
+# setkey(ftype, year, serial, pernum)
+# setkey(d, year, serial, pernum)
+# d <- ftype[d]
+# rm(ftype)
 
 # Create fam_head
-d[ , fam_head := pernum==subfamid]
+# DB 5/9/2022, updating to not use pointers:
+############################################
+# Just use relate and pernum to identify head of family / household
+hhs_with_heads <- d[relate == "Head/householder", .(year, serial)]
+hhs_with_heads[ , has_head := TRUE]
+d <- hhs_with_heads[d, on = c("year", "serial")]
+d[is.na(has_head), has_head := FALSE]
+d[ , fam_head := relate == "Head/householder" | (pernum == 1 & !has_head)]
 # table(d$fam_head)
-setkey(d, year, serial, subfamid)
-nrow(unique(d))
-# Good: 977,359 family heads and the same number of subfamilies
+# uniqueN(d, by = c("year", "serial"))
+# Good: 908,849 family heads and the same number of households
 
 if(imputation) {
     save(d, file="main/1_clean_data/cleaned_data_step_3.Rdata")
